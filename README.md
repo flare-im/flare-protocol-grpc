@@ -16,7 +16,7 @@ English · [中文](README.zh-CN.md)
 > - **`HttpHookTokenValidator`** — POSTs the token to your own endpoint;
 >   **this is the entry point for integrating your own user system**.
 >
-> Business rules work the same way: `flare-im-core/crates/flare-im-hooks`
+> Business rules work the same way: `flare-core-server/crates/flare-im-hooks`
 > provides 9 extension points (PreSend / PostSend / Delivery / Recall /
 > MessageRead / MessageReaction / ConversationLifecycle / ConversationMember /
 > GetConversationParticipants).
@@ -66,7 +66,7 @@ The files currently compiled by `build.rs` (order matters for dependency resolut
 - `storage_service.proto`
 - `sync_service.proto`
 
-The `import` statements for base types are provided by **`flare-proto/proto`**;
+The `import` statements for base types are provided by **`flare-protocol/proto`**;
 at compile time the include path is "base directory first, then this directory",
 to reduce ambiguity over identically named imports.
 
@@ -83,7 +83,7 @@ to reduce ambiguity over identically named imports.
 cargo build -p flare-grpc-proto
 ```
 
-After modifying any `proto/*.proto` or any referenced file under `flare-proto/proto`, rebuilding will trigger `build.rs` to regenerate the code.
+After modifying any `proto/*.proto` or any referenced file under `flare-protocol/proto`, rebuilding will trigger `build.rs` to regenerate the code.
 
 ## Usage
 
@@ -120,7 +120,7 @@ Licensed under the [Apache License 2.0](LICENSE).
 
 | What you want to do | Where to go |
 |---|---|
-| **Get it running in five minutes** | [QUICKSTART](https://github.com/flare-im/flare-im-core-server/blob/main/QUICKSTART.md) — start the services, hand-sign a token, and call the APIs, **without building your own user system** |
+| **Get it running in five minutes** | [QUICKSTART](https://github.com/flare-im/flare-core-server/blob/main/QUICKSTART.md) — start the services, hand-sign a token, and call the APIs, **without building your own user system** |
 | Integrate your own user system | Implement `TokenValidator` (`CoreJwtTokenValidator` for local signature verification / `HttpHookTokenValidator` to call your own endpoint) |
 | Add your own business rules | The 9 extension points of `flare-im-hooks`: PreSend / PostSend / Delivery / Recall / MessageRead / MessageReaction / ConversationLifecycle / ConversationMember / GetConversationParticipants |
 | Build a UI | [`@flare-im/vue-ui`](https://www.npmjs.com/package/@flare-im/vue-ui) — 107 components, with a contract consistent across four platforms |
@@ -139,5 +139,5 @@ data residency / SLA support.
 
 Inquiries: `flare1522@163.com`
 
-> For the boundary split and the immutable commitments, see [GOVERNANCE](https://github.com/flare-im/flare-im-core-server/blob/main/GOVERNANCE.md).
+> For the boundary split and the immutable commitments, see [GOVERNANCE](https://github.com/flare-im/flare-core-server/blob/main/GOVERNANCE.md).
 > In short: **what has been open-sourced will not be taken back, and the authentication and hooks contracts will always remain open-source and will never be crippled to force payment.**

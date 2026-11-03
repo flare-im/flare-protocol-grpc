@@ -110,7 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn flare_proto_include_dir(manifest: &Path) -> PathBuf {
     std::env::var_os("DEP_FLARE_PROTO_PROTO_PATH")
         .map(PathBuf::from)
-        .unwrap_or_else(|| manifest.join("..").join("flare-proto").join("proto"))
+        .unwrap_or_else(|| manifest.join("..").join("flare-protocol").join("proto"))
 }
 
 fn proto_include_dirs(base_proto: &Path, grpc_proto: &Path) -> Vec<String> {

@@ -7,7 +7,7 @@ option go_package = "github.com/flare-labs/flare/proto/control/v1;controlv1";
 // =============================================================================
 // TenantProjection(控制面 → 数据面的租户/开关投影)
 // =============================================================================
-// 真源在控制面(flare-social/platform/control)。数据面(flare-social 的 flare-social-control、
+// 真源在控制面(flare-social-server/platform/control)。数据面(flare-social 的 flare-social-control、
 // flare-im-core 的 capability 进程)各实现一份本服务,只负责把投影落到本地表并按
 // version 幂等:收到的 version 小于等于本地已有版本即丢弃并返回当前版本。
 //
