@@ -1,6 +1,6 @@
 # flare-grpc-proto
 
-English · [中文](README.zh-CN.md)
+English · [Simplified Chinese](README.zh-CN.md)
 
 > ## ℹ This is communication infrastructure, not a ready-to-use IM product
 >
@@ -120,7 +120,7 @@ Licensed under the [Apache License 2.0](LICENSE).
 
 | What you want to do | Where to go |
 |---|---|
-| **Get it running in five minutes** | [QUICKSTART](https://github.com/flare-im/flare-core-server/blob/main/QUICKSTART.md) — start the services, hand-sign a token, and call the APIs, **without building your own user system** |
+| **Get it running in five minutes** | [QUICKSTART](https://github.com/flare-im/flare-core-server/blob/main/docs/QUICKSTART.md) — start the services, hand-sign a token, and call the APIs, **without building your own user system** |
 | Integrate your own user system | Implement `TokenValidator` (`CoreJwtTokenValidator` for local signature verification / `HttpHookTokenValidator` to call your own endpoint) |
 | Add your own business rules | The 9 extension points of `flare-im-hooks`: PreSend / PostSend / Delivery / Recall / MessageRead / MessageReaction / ConversationLifecycle / ConversationMember / GetConversationParticipants |
 | Build a UI | [`@flare-im/vue-ui`](https://www.npmjs.com/package/@flare-im/vue-ui) — 107 components, with a contract consistent across four platforms |
@@ -139,5 +139,9 @@ data residency / SLA support.
 
 Inquiries: `flare1522@163.com`
 
-> For the boundary split and the immutable commitments, see [GOVERNANCE](https://github.com/flare-im/flare-core-server/blob/main/GOVERNANCE.md).
+> For the boundary split and the immutable commitments, see [GOVERNANCE](https://github.com/flare-im/flare-core-server/blob/main/.github/GOVERNANCE.md).
 > In short: **what has been open-sourced will not be taken back, and the authentication and hooks contracts will always remain open-source and will never be crippled to force payment.**
+
+## Coordinated Changes
+
+Land wire-level changes in [flare-protocol](https://github.com/flare-im/flare-protocol) first. Then regenerate gRPC bindings and verify the affected server and SDK callers.
