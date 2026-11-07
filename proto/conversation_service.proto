@@ -34,6 +34,24 @@ service ConversationReadService {
   rpc ListConversationParticipants(ListConversationParticipantsRequest) returns (ListConversationParticipantsResponse);  // 分页获取会话参与者（唯一成员读路径）
 }
 
+// An external conversation owner can authorize disclosure of member identities.
+// The caller's verified user and tenant come from the forwarded signed context.
+service ConversationRosterPolicyService {
+  rpc CheckRosterVisibility(CheckRosterVisibilityRequest) returns (CheckRosterVisibilityResponse);
+}
+
+message CheckRosterVisibilityRequest {
+  repeated string channel_ids = 1;
+}
+
+message CheckRosterVisibilityResponse {
+  // Omission denies full roster disclosure. Channel IDs must come from the request.
+  repeated string full_roster_channel_ids = 1;
+  // Channels confirmed to have no external owner in this tenant. Core may use
+  // its own roster only for conversations that are not explicitly external.
+  repeated string unmanaged_channel_ids = 2;
+}
+
 /// MessageReadReceiptService：群聊消息的已读回执读（只读，与 ConversationReadService 同一身份边界）。
 /// 发送者查看自己消息的「N 人未读 / 全部已读」与已读名单。
 service MessageReadReceiptService {
@@ -49,6 +67,7 @@ service ConversationManageService {
   rpc UpdateConversation(UpdateConversationRequest) returns (UpdateConversationResponse);  // 更新会话
   rpc DeleteConversation(DeleteConversationRequest) returns (google.protobuf.Empty);  // 删除会话
   rpc PurgeConversationHistory(PurgeConversationHistoryRequest) returns (PurgeConversationHistoryResponse);  // 按时间边界硬删历史，保留会话与此后的消息
+  rpc ClearConversationHistory(ClearConversationHistoryRequest) returns (ClearConversationHistoryResponse);
   rpc ManageParticipants(ManageParticipantsRequest) returns (ManageParticipantsResponse);  // 管理参与者
   rpc SearchConversations(SearchConversationsRequest) returns (SearchConversationsResponse);  // 搜索会话
   rpc UpdateCursor(UpdateCursorRequest) returns (google.protobuf.Empty);  // 更新同步游标
@@ -386,6 +405,8 @@ message UpdateConversationUserSettingsRequest {
   uint64 base_settings_version = 6;
   /// 只接收提到我的消息；与 is_muted 正交
   optional bool is_mention_only = 7;
+  /// Monotonically advance the authenticated participant’s history cutoff.
+  optional uint64 clear_history_through_seq = 8;
 }
 
 message UpdateConversationUserSettingsResponse {
@@ -428,6 +449,16 @@ message PurgeConversationHistoryRequest {
 message PurgeConversationHistoryResponse {
   uint64 purged_messages = 1;  // 本次删除的消息条数（重放时为 0）
   uint64 max_purged_seq = 2;  // 被删消息中最大的会话 seq；没删任何消息时为 0
+}
+
+// Service-only visibility cutoff. The server snapshots the persisted message high-water mark.
+// The conversation and later messages remain visible. Storage retention is unchanged.
+message ClearConversationHistoryRequest {
+  string conversation_id = 1;
+}
+
+message ClearConversationHistoryResponse {
+  uint64 cleared_through_seq = 1;
 }
 
 /// 管理参与者请求（添加/移除/角色变更）

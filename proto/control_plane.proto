@@ -28,6 +28,9 @@ service TenantProjection {
   // 只有 Social 投影接收端实现(供统一网关 admin 分区本地授权);核返回 UNIMPLEMENTED。
   // 令牌租户范围必须是 `*`;整份替换,按 version 幂等。
   rpc UpsertRoleBundle(RoleBundleProjectionUpsert) returns (ProjectionAck);
+  // 应用的接入/发布水位与构建策略,在 Core 与 Social 各落一份;整份替换,按 version 幂等。
+  // Core 接受更高版本后,在同一事务里排队 flare.access / flare.release 租户通知。
+  rpc UpsertClientPolicy(ClientPolicyUpsert) returns (ProjectionAck);
   rpc GetVersions(GetVersionsRequest) returns (ProjectionVersions);
 }
 
@@ -162,6 +165,31 @@ message RoleBundleProjectionUpsert {
 }
 
 // ----------------------------------------------------------------------------
+// 客户端策略投影(整应用快照)
+// ----------------------------------------------------------------------------
+// 只在清单回读确认之后投影:客户端收到通知时一定拉得到新文档。access_serial 与
+// release_generation 是只进不退的水位,更高的 version 带来更小的值时接收端保留原值。
+// 版本比较只看 version;水位前进才发通知,build_policies 单独变化不发。
+message BuildRange {
+  uint64 from = 1;  // 含
+  uint64 to = 2;    // 含,不小于 from
+}
+
+message BuildPolicy {
+  uint64 min_build = 1;                    // 0 = 不限
+  int64 min_build_effective_from_ms = 2;   // 0 = 立即生效;负数必须拒绝
+  repeated BuildRange blocked = 3;         // 最多 64 段
+}
+
+message ClientPolicyUpsert {
+  string app_id = 1;
+  uint64 version = 2;             // 投影版本(幂等),非零
+  uint64 access_serial = 3;       // 已发布的接入清单 serial;0 = 从未发布
+  uint64 release_generation = 4;  // 应用级计数:该应用任一发布清单发布即 +1;0 = 从未发布
+  map<string, BuildPolicy> build_policies = 5;  // key = platform([a-z0-9_-]{1,32}),最多 32 项
+}
+
+// ----------------------------------------------------------------------------
 // 通用
 // ----------------------------------------------------------------------------
 
@@ -180,6 +208,7 @@ message TenantVersions {
   uint64 credentials_version = 3; // 空凭证快照也保留版本水位
   uint64 role_bundle_version = 4; // 只在 key = "*" 的条目上有意义;其余为 0
   uint64 plugins_version = 5;
+  uint64 client_policy_version = 6;
 }
 
 message ProjectionVersions {

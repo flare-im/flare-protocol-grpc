@@ -379,6 +379,10 @@ message GetFileUrlRequest {
   map<string, string> response_headers = 6;  // 响应头
   bool retention_protected = 9;  // 附件是否受 retention 策略保护
   flare.common.v1.ContentVisibility content_visibility = 10;  // 服务端读模型中的内容可见性
+  // Optional message-bound read; Media verifies the persisted attachment through
+  // Storage Reader under the original signed User, never a client claim alone.
+  string conversation_id = 11;
+  int64 message_seq = 12;
 
   reserved 7, 8;
   reserved "burn_protected", "burn_status";

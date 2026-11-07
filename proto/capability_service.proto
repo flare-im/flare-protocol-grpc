@@ -57,6 +57,24 @@ service CapabilityAdminService {
   rpc GetTenantRuntime(GetTenantRuntimeRequest) returns (GetTenantRuntimeResponse);
 }
 
+// 租户配置变更通知（通用原语）。业务服务提交了某个租户的配置读模型后，发布「这个 topic 前进到
+// version」；Core 按 (租户, topic) 保证版本单调后下发给该租户的在线连接（`DataPacket.tenant_notice`）。
+// 调用方必须带 Cell 签名的服务身份（`x-flare-ctx`）：租户只取自签名（`*` 为全部租户），topic 必须落在
+// 该服务登记的命名空间内；`flare.` 留给 Core 自己。Core 不解释 topic。
+service TenantNoticeService {
+  rpc Publish(PublishTenantNoticeRequest) returns (PublishTenantNoticeResponse);
+}
+
+message PublishTenantNoticeRequest {
+  string topic = 1;    // 小写点分，最长 64 字节
+  uint64 version = 2;  // 大于 0
+}
+
+message PublishTenantNoticeResponse {
+  bool accepted = 1;         // 版本前进并已发布；false：已有不低于它的版本
+  uint64 current_version = 2;
+}
+
 // ----------------------------------------------------------------------------
 // GenericCall 载荷 — CapabilityService.Administer + HookPlugin.Call + ExtensionPlugin.Call
 // ----------------------------------------------------------------------------
@@ -1070,6 +1088,14 @@ message PluginTenantState {
   // Normal preparation validates plugin configuration before installation ACK.
   // An authenticated emergency deny may bypass business validation, never enable.
   bool validate_configuration = 10;
+  // Immutable app owner resolved by Catalog and covered by the control worker's signature.
+  string organization_id = 11;
+  // Same platform-approved grant projected to the deployment for explicitly
+  // authenticated workload reads. Empty projections deny these new reads;
+  // existing ticket-based user/staff invocations remain separately admitted.
+  repeated string approved_operations = 12;
+  repeated string permissions = 13;
+  repeated string data_scopes = 14;
 }
 message PluginTenantStateAck {
   uint64 revision = 1;

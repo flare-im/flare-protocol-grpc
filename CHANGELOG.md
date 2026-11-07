@@ -19,6 +19,9 @@
   角色权限包投影(角色 → 权限码、已吊销会话 jti、员工会话验签 JWKS),供统一网关 admin 分区
   本地授权;只有 Social 接收端实现,核返回 UNIMPLEMENTED。`TenantProjectionUpsert` 新增
   `organization_id`(7),`TenantVersions` 新增 `role_bundle_version`(4)。
+- `TenantProjection.UpsertClientPolicy` 与 `ClientPolicyUpsert`、`BuildPolicy`、`BuildRange`:
+  应用的接入清单 serial、发布代数与构建策略,Core 与 Social 各落一份;`TenantVersions` 新增
+  `client_policy_version`(6)。实现 `TenantProjection` 的服务端与测试替身需要补上新方法。
 - `OnlineService.KickTenant`:按租户踢出全部连接(租户停用时由控制面调用)。
 - `ConversationManageService.PurgeConversationHistory`:物理删除会话里服务端时间早于
   `before_ms` 的消息、事件、置顶与标记,会话、成员与边界之后的消息保留,重复调用幂等。
