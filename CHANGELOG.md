@@ -7,6 +7,9 @@
 
 ### 新增
 
+- `control_plane.proto`:`ClientBuildStats.GetConnectionBuilds(GetConnectionBuildsRequest)
+  -> ConnectionBuilds`,平台读应用在各接入网关上的（平台，构建）在线连接数。只有核实现。
+
 - `AccessGateway.PushCapability(PushCapabilityRequest)` 与 `PushService.PushCapability`
   (`PushCapabilityRequest`/`PushCapabilityResponse`)：插件实时包（宿主能力 `im.realtime.deliver`）
   原样作为 `DataPacket.capability` 下发给所列用户的全部在线连接；只在线、不入库、不做离线推送、至多一次。
