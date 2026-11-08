@@ -39,8 +39,9 @@ service TenantProjection {
 // =============================================================================
 // 只有核(capability 进程)实现。各接入网关每 30s 把本实例的（平台，构建）在线连接数写进
 // Redis(TTL 120s),这里把仍在存活窗口内的网关汇总起来。数据最多滞后一个上报周期,
-// 网关宕机后最多 120s 退出统计。鉴权与 TenantProjection 相同:平台 worker 的控制断言,
-// 绑定到请求的 app_id(或平台级 `*`)。
+// 网关宕机后最多 120s 退出统计。鉴权:平台 worker 的控制断言,audience 是只读的
+// `flare-core-build-stats`(与 TenantProjection 的 `flare-core-projection` 互不通用),
+// 令牌租户必须正是请求的 app_id;平台级 `*` 拒绝(PERMISSION_DENIED)。
 
 service ClientBuildStats {
   rpc GetConnectionBuilds(GetConnectionBuildsRequest) returns (ConnectionBuilds);
