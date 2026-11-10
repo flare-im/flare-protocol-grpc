@@ -7,6 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let protos = vec![
         grpc_proto.join("access_gateway.proto"),
+        grpc_proto.join("auth_revoke.proto"),
         grpc_proto.join("control_plane.proto"),
         grpc_proto.join("conversation_service.proto"),
         grpc_proto.join("capability_service.proto"),

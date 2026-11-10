@@ -51,7 +51,7 @@ flare-grpc-proto/
 
 - `access_gateway.proto`
 - `conversation_service.proto`
-- `capability_service.proto`（包名 `flare.capability.v1`：`CapabilityService`、`HookExtension`、`HookService`）
+- `capability_service.proto`（包名 `flare.capability.v1`：`CapabilityService`、`HookPlugin`、`ExtensionPlugin`）
 - `media_service.proto`
 - `message_service.proto`
 - `online.proto`

@@ -8,6 +8,11 @@
 #![allow(clippy::large_enum_variant)]
 
 pub mod flare {
+    pub mod auth_revoke {
+        pub mod v1 {
+            tonic::include_proto!("flare.auth_revoke.v1");
+        }
+    }
     pub mod access_gateway {
         pub mod v1 {
             tonic::include_proto!("flare.access_gateway.v1");
@@ -194,17 +199,9 @@ pub use media::{
 };
 
 pub use capability::{
-    ConversationLifecycleHookRequest, ConversationLifecycleHookResponse, CustomHookRequest,
-    CustomHookResponse, DeliveryHookRequest as ProtoDeliveryHookRequest,
-    DeliveryHookResponse as ProtoDeliveryHookResponse, GenericRequest, GenericResponse,
-    HookDeliveryEvent as ProtoHookDeliveryEvent,
-    HookInvocationContext as ProtoHookInvocationContext, HookMessageDraft as ProtoHookMessageDraft,
-    HookMessageRecord as ProtoHookMessageRecord, HookRecallEvent as ProtoHookRecallEvent,
-    PostSendHookRequest as ProtoPostSendHookRequest,
-    PostSendHookResponse as ProtoPostSendHookResponse,
-    PreSendHookRequest as ProtoPreSendHookRequest, PreSendHookResponse as ProtoPreSendHookResponse,
-    PresenceHookRequest, PresenceHookResponse, RecallHookRequest as ProtoRecallHookRequest,
-    RecallHookResponse as ProtoRecallHookResponse,
+    GenericRequest, GenericResponse, HookInvocationContext as ProtoHookInvocationContext,
+    HookMessageDraft as ProtoHookMessageDraft, PreSendHookRequest as ProtoPreSendHookRequest,
+    PreSendHookResponse as ProtoPreSendHookResponse,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -276,3 +273,8 @@ pub struct ReadmeEn;
 #[cfg(doctest)]
 #[doc = include_str!("../README.zh-CN.md")]
 pub struct ReadmeZh;
+
+/// Private identity-owner session revocation boundary.
+pub mod auth_revoke {
+    pub use crate::flare::auth_revoke::v1::*;
+}

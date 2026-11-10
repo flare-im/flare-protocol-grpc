@@ -19,6 +19,10 @@ import "message.proto";
 
 // MediaService：上传/分片/引用/访问/删除/图片视频处理/ACL/桶
 service MediaService {
+  rpc GetAdminUploadPolicy(AdminUploadPolicyRequest) returns (AdminUploadPolicyResponse);
+  rpc AdminInitiateDirectUpload(AdminInitiateDirectUploadRequest) returns (InitiateDirectUploadResponse);
+  rpc ValidateApplicationMedia(ValidateApplicationMediaRequest) returns (ValidateApplicationMediaResponse);
+  rpc ResolveApplicationAvatarMedia(ResolveApplicationAvatarMediaRequest) returns (GetFileUrlResponse);
   rpc UploadFile(stream UploadFileRequest) returns (UploadFileResponse);  // 流式上传
   rpc InitiateMultipartUpload(InitiateMultipartUploadRequest) returns (InitiateMultipartUploadResponse);  // 初始化分片
   rpc UploadMultipartChunk(UploadMultipartChunkRequest) returns (UploadMultipartChunkResponse);  // 上传分片
@@ -77,6 +81,48 @@ enum DirectUploadTransportKind {
   DIRECT_UPLOAD_TRANSPORT_KIND_MULTIPART_PUT = 2;
 }
 
+enum MediaOwnerKind {
+  MEDIA_OWNER_KIND_UNSPECIFIED = 0;
+  MEDIA_OWNER_KIND_USER = 1;
+  MEDIA_OWNER_KIND_APPLICATION = 2;
+}
+
+enum MediaPurpose {
+  MEDIA_PURPOSE_GENERAL = 0;
+  MEDIA_PURPOSE_AVATAR = 1;
+  MEDIA_PURPOSE_IMAGE = 2;
+}
+
+message AdminUploadPolicyRequest { MediaPurpose purpose = 1; }
+message AdminUploadPolicyResponse {
+  string tenant_id = 1;
+  MediaPurpose purpose = 2;
+  uint64 max_bytes = 3;
+  repeated string allowed_mime_types = 4;
+  uint64 max_pixels = 5;
+  uint32 max_dimension = 6;
+}
+message AdminInitiateDirectUploadRequest {
+  string file_name = 1;
+  string mime_type = 2;
+  int64 file_size = 3;
+  MediaPurpose purpose = 4;
+}
+message ValidateApplicationMediaRequest {
+  string file_id = 1;
+  MediaPurpose purpose = 2;
+}
+message ValidateApplicationMediaResponse {
+  string file_id = 1;
+  MediaPurpose purpose = 2;
+  string mime_type = 3;
+  int64 size = 4;
+}
+message ResolveApplicationAvatarMediaRequest {
+  string file_id = 1;
+  int32 expires_in = 2;
+}
+
 // 文件信息
 message FileInfo {
   string file_id = 1;  // 文件 ID
@@ -95,6 +141,8 @@ message FileInfo {
   string bucket = 15;  // 桶名
   string object_key = 16;  // 对象键
   string tenant = 17;  // 租户
+  MediaOwnerKind owner_kind = 18;
+  MediaPurpose purpose = 19;
 }
 
 // 媒体引用信息

@@ -55,6 +55,16 @@
 
 ### 移除
 
+- `capability_service.proto`：Hook 点只留 `message.pre_send`。`HookPoint` 删掉其余 16 个取值；删掉
+  `PostSendHook*`、`DeliveryHook*`、`RecallHook*`、已读、表态、会话、成员、推送、用户、在线状态和
+  `CustomHook*` 这些请求与事件，以及 `HookGroup`、`ExecutionMode`、`HookErrorPolicy`、
+  `LifecycleEventType`、`ConversationMemberChangeType`。事后观察归事件。`HookPlugin.Call`、
+  `PreSendHookRequest`、`PreSendHookResponse` 不变。
+- `capability_service.proto`：Hook 管理消息收敛到「一个点位 + 一个目标」。删 `HookPoint`、`HookRetryPolicy`，
+  删 `hook_points`、`retry_policy`、`config_extensions`、`HookTransport.target`，`HookSelector` 只留
+  `tenants`、`conversation_types`、`message_types`；`priority` 改名 `order`，新增 `required`，更新请求里
+  这两个是 `optional`。`tenant_id` 空是平台 Hook。新增 `ListHookPoints*`、`ListHookProfiles*`、
+  `TestHookConfig*`。
 - `sfu_control.proto`（`flare.sfu.control.v1`）与 crate feature `sfu_control`：通话改为托管插件
   `flare.call`，Core 不再经 SFU 控制面契约调用媒体服务。
 

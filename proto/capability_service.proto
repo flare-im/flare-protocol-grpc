@@ -6,9 +6,6 @@ import "google/protobuf/timestamp.proto";
 import "google/protobuf/any.proto";
 import "errors.proto";
 import "metadata.proto";
-import "message.proto";
-import "conversation.proto";
-import "conversation_service.proto";
 import "control_plane.proto";
 
 // =============================================================================
@@ -17,13 +14,8 @@ import "control_plane.proto";
 
 service CapabilityService {
   rpc ListCapabilities(ListCapabilitiesRequest) returns (ListCapabilitiesResponse);
-  rpc ListUserCapabilities(ListUserCapabilitiesRequest) returns (ListUserCapabilitiesResponse);
   rpc Dispatch(DispatchCapabilityRequest) returns (DispatchCapabilityResponse);
-  rpc GrantUserCapability(GrantUserCapabilityRequest) returns (GrantUserCapabilityResponse);
-  rpc RevokeUserCapability(RevokeUserCapabilityRequest) returns (RevokeUserCapabilityResponse);
   rpc SetTenantCapabilitySwitch(SetTenantCapabilitySwitchRequest) returns (SetTenantCapabilitySwitchResponse);
-  rpc RegisterPluginEndpoint(RegisterPluginEndpointRequest) returns (RegisterPluginEndpointResponse);
-  rpc DeregisterPluginEndpoint(DeregisterPluginEndpointRequest) returns (DeregisterPluginEndpointResponse);
   rpc ListRegisteredPlugins(ListRegisteredPluginsRequest) returns (ListRegisteredPluginsResponse);
   rpc Administer(GenericRequest) returns (GenericResponse);
 }
@@ -96,14 +88,11 @@ message GenericResponse {
 // flare.capability.v1 — 三服务控制面 + IM / 飞书式 Hook（开发期可任意 breaking，以契约为准）
 //
 // CapabilityService：目录、授权、Dispatch、租户开关；插件 endpoint 注册；Administer(operation+Any)。
-// HookPlugin：IM 主链/周边事件，仅 Call；显式 *Request/*Response + HookExtensionBag + HookRoutingHints。
+// HookPlugin：消息发送前的同步拦截，仅 Call；显式 *Request/*Response + HookExtensionBag + HookRoutingHints。
 // ExtensionPlugin：SFU/RTC/媒体/信令，仅 Call。
 //
 // HookPlugin.Call — operation -> payload message：
-//   flare.hook.v1.pre_send / post_send / delivery / recall /
-//   message_read / message_reaction / conversation_lifecycle / conversation_member /
-//   presence / custom / push_pre_send / push_post_send / push_delivery /
-//   user_login / user_logout / user_online / user_offline
+//   flare.hook.v1.pre_send -> PreSendHookRequest / PreSendHookResponse
 
 // ----------------------------------------------------------------------------
 // 消息与枚举
@@ -126,25 +115,6 @@ message CapabilityDescriptor {
 
 message ListCapabilitiesResponse {
   repeated CapabilityDescriptor capabilities = 1;
-}
-
-message ListUserCapabilitiesRequest {
-  string tenant_id = 1;
-  string user_id = 2;
-}
-
-message UserCapabilityGrant {
-  string tenant_id = 1;
-  string user_id = 2;
-  string capability_id = 3;
-  google.protobuf.Timestamp granted_at = 4;
-  google.protobuf.Timestamp expires_at = 5;
-  string plan_code = 6;
-  string source = 7;
-}
-
-message ListUserCapabilitiesResponse {
-  repeated UserCapabilityGrant grants = 1;
 }
 
 // 命令式能力分发：新增业务线优先扩展 capability_id + payload_json，避免加 RPC。
@@ -175,29 +145,6 @@ message DispatchCapabilityResponse {
   CapabilityDispatchResult result = 1;
 }
 
-message GrantUserCapabilityRequest {
-  string tenant_id = 1;
-  string user_id = 2;
-  string capability_id = 3;
-  string expires_at_rfc3339 = 4;
-  string plan_code = 5;
-  string source = 6;
-}
-
-message GrantUserCapabilityResponse {
-  string message = 1;
-}
-
-message RevokeUserCapabilityRequest {
-  string tenant_id = 1;
-  string user_id = 2;
-  string capability_id = 3;
-}
-
-message RevokeUserCapabilityResponse {
-  string message = 1;
-}
-
 message SetTenantCapabilitySwitchRequest {
   string tenant_id = 1;
   string capability_id = 2;
@@ -209,60 +156,12 @@ message SetTenantCapabilitySwitchResponse {
 }
 
 // ----------------------------------------------------------------------------
-// 插件路由注册 — SFU / Extension 数据面发现（由 CapabilityService 管理）
+// 插件实例诊断 — 只读，来自应用的已授权插件快照
 // ----------------------------------------------------------------------------
-
-message RegisterPluginEndpointRequest {
-  string tenant_id = 1;
-  string plugin_id = 2;
-  // 与 CapabilityDescriptor.capability_id 对齐，如 media.sfu.v1、rtc.room.v1
-  string capability_id = 3;
-  // gRPC 目标，如 host:port；实现可约定 dns:/// 或 xds 资源名由网关消化
-  string grpc_authority = 4;
-  map<string, string> labels = 5;
-  string request_id = 6;
-
-  // 注册声明字段由服务端校验必填。声明校验不等于发布者签名或租户审批。
-
-  // 插件自身版本（语义化版本），用于兼容窗口、灰度与回滚。
-  string plugin_version = 7;
-
-  // 插件面向的插件 API 版本。核心据此判断能否加载，
-  // 而不是等调用时才发现契约对不上。
-  string api_version = 8;
-
-  // 插件清单（plugin.json）的 sha256。核心据此确认**部署的插件与目录里那份是同一个**。
-  // 没有它，目录只是一份说明文档，无法作为可信来源。
-  string manifest_sha256 = 9;
-
-  // 本插件声明能处理的 operation 全集。
-  //
-  // 这条是「声明即边界」的载体：声明之外的调用一律拒绝。
-  // 留空、重复或包含未声明入口时拒绝注册。
-  repeated string declared_operations = 10;
-
-  reserved 11;
-  reserved "seat_model";
-}
-
-message RegisterPluginEndpointResponse {
-  bool accepted = 1;
-  string message = 2;
-}
-
-message DeregisterPluginEndpointRequest {
-  string tenant_id = 1;
-  string plugin_id = 2;
-  string request_id = 3;
-}
-
-message DeregisterPluginEndpointResponse {
-  bool accepted = 1;
-}
 
 message ListRegisteredPluginsRequest {
   string tenant_id = 1;
-  // 可选：按能力过滤；空表示租户下全部已注册实例
+  // 可选：按能力过滤；空表示租户下全部实例
   string capability_id = 2;
 }
 
@@ -272,15 +171,12 @@ message RegisteredPluginInstance {
   string grpc_authority = 3;
   map<string, string> labels = 4;
 
-  // ---- 注册契约 v2 的留存值，语义同 RegisterPluginEndpointRequest ----
   string plugin_version = 5;
   string api_version = 6;
   string manifest_sha256 = 7;
   repeated string declared_operations = 8;
   // 未验证实例仅用于诊断展示，禁止接收业务调用。
   bool unverified = 9;
-  reserved 10;
-  reserved "seat_model";
 }
 
 message ListRegisteredPluginsResponse {
@@ -342,84 +238,11 @@ message HookRoutingHints {
   string audit_severity = 6;  // info | notice | warn（审计分级，可选）
 }
 
-// 钩子点枚举：用于 HookConfig 选择器、观测与文档对齐 hook_type 字符串。
-enum HookPoint {
-  HOOK_POINT_UNSPECIFIED = 0;
-  HOOK_POINT_MESSAGE_PRE_SEND = 1;
-  HOOK_POINT_MESSAGE_POST_SEND = 2;
-  HOOK_POINT_MESSAGE_DELIVERY = 3;
-  HOOK_POINT_MESSAGE_RECALL = 4;
-  HOOK_POINT_MESSAGE_READ = 5;
-  HOOK_POINT_MESSAGE_REACTION = 6;
-  HOOK_POINT_CONVERSATION_LIFECYCLE = 7;
-  HOOK_POINT_CONVERSATION_MEMBER = 8;
-  HOOK_POINT_PRESENCE = 9;
-  HOOK_POINT_CUSTOM = 10;
-  HOOK_POINT_PUSH_PRE_SEND = 20;
-  HOOK_POINT_PUSH_POST_SEND = 21;
-  HOOK_POINT_PUSH_DELIVERY = 22;
-  HOOK_POINT_USER_LOGIN = 30;
-  HOOK_POINT_USER_LOGOUT = 31;
-  HOOK_POINT_USER_ONLINE = 32;
-  HOOK_POINT_USER_OFFLINE = 33;
-}
-
 // ----------------------------------------------------------------------------
-// 枚举 — 编排策略（宿主与编排器共用语义）
+// 消息 Hook — 发前
 // ----------------------------------------------------------------------------
-
-// Hook 分组：决定串并行、快速失败与容错；与 flare-capability 域内 HookGroup 对齐。
-enum HookGroup {
-  HOOK_GROUP_UNSPECIFIED = 0;
-  HOOK_GROUP_VALIDATION = 1;  // 校验类，串行快速失败
-  HOOK_GROUP_CRITICAL = 2;  // 关键业务，串行重试
-  HOOK_GROUP_BUSINESS = 3;  // 非关键，并发容错
-}
-
-// 执行模式
-enum ExecutionMode {
-  EXECUTION_MODE_UNSPECIFIED = 0;
-  EXECUTION_MODE_SEQUENTIAL = 1;  // 串行
-  EXECUTION_MODE_CONCURRENT = 2;  // 并发
-}
-
-// Hook 错误策略
-enum HookErrorPolicy {
-  HOOK_ERROR_POLICY_UNSPECIFIED = 0;
-  HOOK_ERROR_POLICY_FAIL_FAST = 1;  // 快速失败
-  HOOK_ERROR_POLICY_RETRY = 2;  // 重试
-  HOOK_ERROR_POLICY_IGNORE = 3;  // 忽略
-}
-
-// 生命周期事件类型
-enum LifecycleEventType {
-  LIFECYCLE_EVENT_TYPE_UNSPECIFIED = 0;
-  LIFECYCLE_EVENT_CREATED = 1;  // 创建
-  LIFECYCLE_EVENT_UPDATED = 2;  // 更新
-  LIFECYCLE_EVENT_DELETED = 3;  // 删除
-  LIFECYCLE_EVENT_ARCHIVED = 4;  // 归档
-  LIFECYCLE_EVENT_UNARCHIVED = 5;  // 解除归档
-  LIFECYCLE_EVENT_SETTINGS_UPDATED = 6;  // 名称/头像/公告等设置变更
-  LIFECYCLE_EVENT_TRANSFER_OWNER = 7;  // 群主/负责人移交
-}
-
-// 会话成员变更（飞书 im.chat.member 类语义）
-enum ConversationMemberChangeType {
-  CONVERSATION_MEMBER_CHANGE_UNSPECIFIED = 0;
-  CONVERSATION_MEMBER_JOINED = 1;
-  CONVERSATION_MEMBER_LEFT = 2;
-  CONVERSATION_MEMBER_INVITED = 3;
-  CONVERSATION_MEMBER_REMOVED = 4;
-  CONVERSATION_MEMBER_ROLE_CHANGED = 5;
-  CONVERSATION_MEMBER_MUTED = 6;
-  CONVERSATION_MEMBER_UNMUTED = 7;
-}
-
-// ----------------------------------------------------------------------------
-// 消息类 Hook — 发前 / 发后 / 送达 / 撤回
-// ----------------------------------------------------------------------------
-// PreSend：可拒绝或回写草稿；PostSend：仅已知落库事实；Delivery/Recall：事件通知。
-// 与核心消息写路径顺序、seq 分配策略的配合由调用文档约定，本 proto 不承载 seq。
+// PreSend：可放行、拒绝或回写草稿。与核心消息写路径顺序、seq 分配策略的配合由调用文档约定，
+// 本 proto 不承载 seq。
 
 // Hook 调用上下文：与 gRPC metadata（trace、tenant、actor）互补。
 // tags/attributes 为轻量透传；结构化扩展用 extension_bag（与飞书回调 header 类似）。
@@ -450,36 +273,6 @@ message HookMessageDraft {
   HookExtensionBag extension_bag = 10;  // 业务自定义区；可回写由宿主持久化策略决定
 }
 
-// 消息落库记录（PostSend 等只读事实 + 可附加上下文）
-message HookMessageRecord {
-  flare.common.v1.Message message = 1;  // 消息
-  google.protobuf.Timestamp persisted_at = 2;  // 落库时间
-  map<string, string> metadata = 3;  // 轻量扩展
-  uint64 server_seq = 4;  // 会话内单调 seq，未分配则 0
-  HookExtensionBag extension_bag = 5;  // 与落库投影一致的扩展（若宿主支持）
-}
-
-// 送达事件
-message HookDeliveryEvent {
-  string message_id = 1;  // 消息 ID
-  string user_id = 2;  // 用户 ID
-  string channel = 3;  // 渠道（push/websocket/apns/fcm）
-  google.protobuf.Timestamp delivered_at = 4;  // 送达时间
-  map<string, string> metadata = 5;  // 轻量扩展
-  string device_id = 6;  // 端侧设备，未知可空
-  HookExtensionBag extension_bag = 7;
-}
-
-// 撤回事件
-message HookRecallEvent {
-  string message_id = 1;  // 消息 ID
-  string operator_id = 2;  // 操作者 ID
-  google.protobuf.Timestamp recalled_at = 3;  // 撤回时间
-  map<string, string> metadata = 4;  // 轻量扩展
-  string recall_scope = 5;  // 如 self / admin / full_conversation
-  HookExtensionBag extension_bag = 6;
-}
-
 // 发前 Hook 请求
 message PreSendHookRequest {
   HookInvocationContext context = 1;  // 上下文
@@ -497,401 +290,33 @@ message PreSendHookResponse {
   string deny_reason_message = 7;  // 人类可读，可展示给运营
 }
 
-// 发后 Hook 请求
-message PostSendHookRequest {
-  HookInvocationContext context = 1;  // 上下文
-  HookMessageRecord record = 2;  // 落库记录
-  HookMessageDraft draft = 3;  // 原草稿
-}
-
-// 发后 Hook 响应（通常只读；可返回侧效应建议）
-message PostSendHookResponse {
-  bool success = 1;  // 是否成功
-  HookRoutingHints routing = 2;  // 如补发推送、修正渠道等建议
-  HookExtensionBag outcome_extensions = 3;
-  string error_code = 4;
-  string error_message = 5;
-}
-
-// 送达 Hook 请求
-message DeliveryHookRequest {
-  HookInvocationContext context = 1;  // 上下文
-  HookDeliveryEvent event = 2;  // 送达事件
-}
-
-// 送达 Hook 响应
-message DeliveryHookResponse {
-  bool success = 1;  // 是否成功
-  HookExtensionBag outcome_extensions = 2;
-}
-
-// 撤回 Hook 请求
-message RecallHookRequest {
-  HookInvocationContext context = 1;  // 上下文
-  HookRecallEvent event = 2;  // 撤回事件
-}
-
-// 撤回 Hook 响应
-message RecallHookResponse {
-  bool allow = 1;  // 是否允许撤回
-  HookRoutingHints routing = 2;  // 如抑制撤回通知推送
-  map<string, string> annotations = 3;  // 透传注解
-  HookExtensionBag outcome_extensions = 4;
-  string deny_reason_code = 5;
-  string deny_reason_message = 6;
-}
-
 // ----------------------------------------------------------------------------
-// 已读回执 Hook — 多端已读水位 / 会话已读（IM 核心观测点）
+// Hook 配置与统计 — 控制面（Capability 写配置、读统计；运行时在 Message Ingest）
 // ----------------------------------------------------------------------------
 
-message MessageReadReceiptEvent {
-  string conversation_id = 1;
-  string message_id = 2;  // 读到的位置锚点消息
-  string reader_user_id = 3;
-  string device_id = 4;
-  google.protobuf.Timestamp read_at = 5;
-  map<string, string> metadata = 6;
-  HookExtensionBag extension_bag = 7;
-}
-
-message MessageReadHookRequest {
-  HookInvocationContext context = 1;
-  MessageReadReceiptEvent event = 2;
-}
-
-message MessageReadHookResponse {
-  bool success = 1;
-  HookExtensionBag outcome_extensions = 2;
-}
-
-// ----------------------------------------------------------------------------
-// 消息表态 / Reaction Hook（点赞、emoji、业务表态键）
-// ----------------------------------------------------------------------------
-
-message MessageReactionEvent {
-  string conversation_id = 1;
-  string message_id = 2;
-  string actor_user_id = 3;
-  string reaction_key = 4;  // 短码或业务自定义键
-  bool added = 5;  // true=添加, false=移除
-  google.protobuf.Timestamp at = 6;
-  map<string, string> metadata = 7;
-  HookExtensionBag extension_bag = 8;
-}
-
-message MessageReactionHookRequest {
-  HookInvocationContext context = 1;
-  MessageReactionEvent event = 2;
-}
-
-message MessageReactionHookResponse {
-  bool allow = 1;  // false=拒绝本次表态变更（宿主须支持）
-  HookExtensionBag outcome_extensions = 2;
-  string deny_reason_code = 3;
-  string deny_reason_message = 4;
-}
-
-// ----------------------------------------------------------------------------
-// 会话生命周期 Hook — 解散/归档等（与会话聚合状态机配合）
-// ----------------------------------------------------------------------------
-// 推荐：会话命令先落库/发领域事件，再调 Lifecycle Hook 做外联；Hook 失败策略
-//（重试/忽略）不得破坏会话状态已提交事实。
-
-// 会话生命周期事件
-message ConversationLifecycleEvent {
-  flare.conversation.v1.Conversation conversation = 1;  // 会话
-  LifecycleEventType event = 2;  // 事件类型
-  map<string, string> metadata = 3;  // 轻量扩展
-  HookExtensionBag extension_bag = 4;
-}
-
-// 会话生命周期 Hook 请求
-message ConversationLifecycleHookRequest {
-  HookInvocationContext context = 1;  // 上下文
-  ConversationLifecycleEvent event = 2;  // 事件
-}
-
-// 会话生命周期 Hook 响应
-message ConversationLifecycleHookResponse {
-  bool success = 1;  // 是否成功（异步旁路时仍应快速返回）
-  HookRoutingHints routing = 2;
-  HookExtensionBag outcome_extensions = 3;
-}
-
-// ----------------------------------------------------------------------------
-// 会话成员 Hook — 进群/退群/禁言等（飞书 chat.member 类）
-// ----------------------------------------------------------------------------
-
-message ConversationMemberEvent {
-  string conversation_id = 1;
-  string tenant_id = 2;
-  ConversationMemberChangeType change = 3;
-  string operator_user_id = 4;  // 邀请人/管理员
-  string affected_user_id = 5;  // 被操作对象
-  string previous_role = 6;  // ROLE_CHANGED 前角色，否则空
-  string new_role = 7;  // 变更后角色
-  google.protobuf.Timestamp occurred_at = 8;
-  map<string, string> metadata = 9;
-  HookExtensionBag extension_bag = 10;
-}
-
-message ConversationMemberHookRequest {
-  HookInvocationContext context = 1;
-  ConversationMemberEvent event = 2;
-}
-
-message ConversationMemberHookResponse {
-  bool allow = 1;  // 对 INVITED/REMOVED 等可拦截时由宿主定义语义；默认 true
-  HookRoutingHints routing = 2;
-  HookExtensionBag outcome_extensions = 3;
-  string deny_reason_code = 4;
-  string deny_reason_message = 5;
-}
-
-// ----------------------------------------------------------------------------
-// 推送 Hook — 与消息 Hook 镜像的语义（任务维度）
-// ----------------------------------------------------------------------------
-// 用于 Push Worker / 模板管线；与 Message 链路解耦但共享 HookGroup/超时思想。
-
-// 推送草稿
-message HookPushDraft {
-  string task_id = 1;  // 任务 ID
-  string user_id = 2;  // 用户 ID
-  string title = 3;  // 标题
-  string content = 4;  // 内容
-  string channel = 5;  // 渠道（push/apns/fcm/websocket）
-  string message_id = 6;  // 关联消息 ID
-  map<string, string> metadata = 7;  // 轻量扩展
-  string collapse_id = 8;  // 折叠/替换组（厂商通道语义）
-  HookExtensionBag extension_bag = 9;
-}
-
-// 推送记录
-message HookPushRecord {
-  string task_id = 1;  // 任务 ID
-  string user_id = 2;  // 用户 ID
-  string title = 3;  // 标题
-  string content = 4;  // 内容
-  string channel = 5;  // 渠道
-  google.protobuf.Timestamp enqueued_at = 6;  // 入队时间
-  map<string, string> metadata = 7;  // 轻量扩展
-  HookExtensionBag extension_bag = 8;
-}
-
-// 推送送达事件
-message HookPushDeliveryEvent {
-  string task_id = 1;  // 任务 ID
-  string user_id = 2;  // 用户 ID
-  string channel = 3;  // 渠道
-  google.protobuf.Timestamp delivered_at = 4;  // 送达时间
-  map<string, string> metadata = 5;  // 轻量扩展
-  HookExtensionBag extension_bag = 6;
-}
-
-// 推送发前 Hook 请求
-message PushPreSendHookRequest {
-  HookInvocationContext context = 1;  // 上下文
-  HookPushDraft draft = 2;  // 草稿
-}
-
-// 推送发前 Hook 响应
-message PushPreSendHookResponse {
-  bool allow = 1;  // 是否允许
-  HookPushDraft draft = 2;  // 修改后草稿
-  HookRoutingHints routing = 3;
-  map<string, string> annotations = 4;  // 透传注解
-  HookExtensionBag outcome_extensions = 5;
-  string deny_reason_code = 6;
-  string deny_reason_message = 7;
-}
-
-// 推送发后 Hook 请求
-message PushPostSendHookRequest {
-  HookInvocationContext context = 1;  // 上下文
-  HookPushRecord record = 2;  // 记录
-  HookPushDraft draft = 3;  // 草稿
-}
-
-// 推送发后 Hook 响应
-message PushPostSendHookResponse {
-  bool success = 1;  // 是否成功
-  HookRoutingHints routing = 2;
-  HookExtensionBag outcome_extensions = 3;
-}
-
-// 推送送达 Hook 请求
-message PushDeliveryHookRequest {
-  HookInvocationContext context = 1;  // 上下文
-  HookPushDeliveryEvent event = 2;  // 送达事件
-}
-
-// 推送送达 Hook 响应
-message PushDeliveryHookResponse {
-  bool success = 1;  // 是否成功
-  HookExtensionBag outcome_extensions = 2;
-}
-
-// ----------------------------------------------------------------------------
-// 用户与在线状态 Hook — 连接与 Presence 域
-// ----------------------------------------------------------------------------
-// 典型用于审计、风控、多端同步旁路；高吞吐场景可宿主侧采样或异步化，契约不变。
-
-// 用户登录事件
-message UserLoginEvent {
-  string user_id = 1;  // 用户 ID
-  string device_id = 2;  // 设备 ID
-  string device_platform = 3;  // 平台（ios/android/web/pc）
-  map<string, string> device_info = 4;  // 设备信息
-  google.protobuf.Timestamp logged_in_at = 5;  // 登录时间
-  map<string, string> metadata = 6;  // 扩展
-}
-
-// 用户登出事件
-message UserLogoutEvent {
-  string user_id = 1;  // 用户 ID
-  string device_id = 2;  // 设备 ID
-  google.protobuf.Timestamp logged_out_at = 3;  // 登出时间
-  map<string, string> metadata = 4;  // 扩展
-}
-
-// 用户上线事件
-message UserOnlineEvent {
-  string user_id = 1;  // 用户 ID
-  string device_id = 2;  // 设备 ID
-  string device_platform = 3;  // 平台
-  google.protobuf.Timestamp online_at = 4;  // 上线时间
-  map<string, string> metadata = 5;  // 扩展
-}
-
-// 用户下线事件
-message UserOfflineEvent {
-  string user_id = 1;  // 用户 ID
-  string device_id = 2;  // 设备 ID
-  google.protobuf.Timestamp offline_at = 3;  // 下线时间
-  string reason = 4;  // 原因（logout/timeout/connection_lost）
-  map<string, string> metadata = 5;  // 扩展
-}
-
-// 用户登录 Hook 请求
-message UserLoginHookRequest {
-  HookInvocationContext context = 1;  // 上下文
-  UserLoginEvent event = 2;  // 事件
-}
-
-// 用户登录 Hook 响应
-message UserLoginHookResponse {
-  bool allow = 1;  // 是否允许
-  HookRoutingHints routing = 2;
-  map<string, string> annotations = 3;  // 透传注解
-  HookExtensionBag outcome_extensions = 4;
-  string deny_reason_code = 5;
-  string deny_reason_message = 6;
-}
-
-// 用户登出 Hook 请求
-message UserLogoutHookRequest {
-  HookInvocationContext context = 1;  // 上下文
-  UserLogoutEvent event = 2;  // 事件
-}
-
-// 用户登出 Hook 响应
-message UserLogoutHookResponse {
-  bool success = 1;  // 是否成功
-  HookExtensionBag outcome_extensions = 2;
-}
-
-// 用户上线 Hook 请求
-message UserOnlineHookRequest {
-  HookInvocationContext context = 1;  // 上下文
-  UserOnlineEvent event = 2;  // 事件
-}
-
-// 用户上线 Hook 响应
-message UserOnlineHookResponse {
-  bool success = 1;  // 是否成功
-  HookExtensionBag outcome_extensions = 2;
-}
-
-// 用户下线 Hook 请求
-message UserOfflineHookRequest {
-  HookInvocationContext context = 1;  // 上下文
-  UserOfflineEvent event = 2;  // 事件
-}
-
-// 用户下线 Hook 响应
-message UserOfflineHookResponse {
-  bool success = 1;  // 是否成功
-  HookExtensionBag outcome_extensions = 2;
-}
-
-// 在线状态事件
-message PresenceEvent {
-  string user_id = 1;  // 用户 ID
-  flare.common.v1.DeviceState state = 2;  // 设备状态
-  string device_id = 3;  // 设备 ID
-  string device_platform = 4;  // 平台
-  google.protobuf.Timestamp occurred_at = 5;  // 发生时间
-  map<string, string> metadata = 6;  // 轻量扩展
-  HookExtensionBag extension_bag = 7;
-}
-
-// 在线状态 Hook 请求
-message PresenceHookRequest {
-  HookInvocationContext context = 1;  // 上下文
-  PresenceEvent event = 2;  // 事件
-}
-
-// 在线状态 Hook 响应
-message PresenceHookResponse {
-  bool success = 1;  // 是否成功
-  HookExtensionBag outcome_extensions = 2;
-}
-
-// 自定义 Hook：飞书「事件扩展」类入口；type 为稳定字符串键（如 card.action.v1），
-// payload 为 JSON UTF-8 或 protobuf 二进制，由 type 与文档约定。
-message CustomHookRequest {
-  HookInvocationContext context = 1;  // 上下文
-  string type = 2;  // 业务扩展类型键，与 HookConfig / 路由表对齐
-  bytes payload = 3;  // 载荷：JSON UTF-8 或 protobuf，由 type 决定
-  string bot_id = 4;  // 机器人 / 应用主体，无则空
-  HookExtensionBag extension_bag = 5;
-}
-
-message CustomHookResponse {
-  bool success = 1;  // 是否成功
-  bytes response_payload = 2;  // 回传业务体，编码与 CustomHookRequest.type 文档对齐
-  HookExtensionBag outcome_extensions = 3;
-  string error_code = 4;
-  string error_message = 5;
-}
-
-// ----------------------------------------------------------------------------
-// Hook 配置与统计 — 数据面（可与执行宿主同进程或分库）
-// ----------------------------------------------------------------------------
-
-// Hook 配置：hook_type 为稳定字符串，与 HookPoint 枚举名语义对齐（如 message_pre_send）；
-// 传输与选择器驱动「改配置不改核心二进制」的扩展模型。
+// 一条 Hook = 一个点位（hook_type）+ 一个目标（transport）。tenant_id 空是平台 Hook，否则是应用
+// Hook。部署 Hook 在部署文件里，不走这条消息，见 HookProfile。点位目录见 hook_point.list。
 message HookConfig {
+  reserved 9, 12, 13;
+
   string hook_id = 1;  // Hook ID
   string name = 2;  // 名称
-  string hook_type = 3;  // 类型（与 HookPoint / operation 文档对齐）
-  string tenant_id = 4;  // 租户 ID
-  int32 priority = 5;  // 优先级 1–1000，越小越先
+  string hook_type = 3;  // 点位的存储名（pre_send）
+  string tenant_id = 4;  // 应用 ID；空为平台
+  int32 order = 5;  // 同一来源内的先后 0–1000，越小越先
   bool enabled = 6;  // 是否启用
-  HookTransport transport = 7;  // 传输配置
+  HookTransport transport = 7;  // 目标
   HookSelector selector = 8;  // 匹配条件，空=全部
-  HookRetryPolicy retry_policy = 9;  // 重试策略
   google.protobuf.Timestamp created_at = 10;  // 创建时间
   google.protobuf.Timestamp updated_at = 11;  // 更新时间
-  repeated HookPoint hook_points = 12;  // 可挂多点时列出；单点可与 hook_type 冗余
-  HookExtensionBag config_extensions = 13;  // 插件私有配置（密钥引用放 metadata/secret store）
+  bool required = 14;  // 必需：目标不可用时回可重试的 503；否则跳过
 }
 
-// Hook 传输：grpc 可走 service_name 服务发现或 endpoint 直连；webhook 用于 HTTP；
-// local 为进程内插件键。与 Rust HookTransportConfig 等实现一一映射。
+// Hook 目标：grpc 走 service_name 服务发现或 endpoint 直连；webhook 用 endpoint。
 message HookTransport {
-  string type = 1;  // 类型（grpc/webhook/local）
+  reserved 9;
+
+  string type = 1;  // 类型（grpc/webhook）
   string service_name = 2;  // 服务发现名，type=grpc 时优先
   string endpoint = 3;  // 直连地址或 Webhook URL
   string registry_type = 4;  // 注册类型（etcd/consul/mesh）
@@ -899,40 +324,30 @@ message HookTransport {
   string load_balance = 6;  // 负载均衡（round_robin/least_conn/...）
   string secret = 7;  // webhook 签名
   map<string, string> headers = 8;  // 请求头
-  string target = 9;  // local 插件名
-  int32 timeout_ms = 10;  // 超时毫秒，默认 5000
+  int32 timeout_ms = 10;  // 这条 Hook 的超时毫秒
   map<string, string> metadata = 11;  // 扩展
 }
 
-// Hook 匹配条件（飞书式多维过滤：租户 + 会话 + 消息 + 应用）
+// Hook 匹配条件：只有运行时实际判断的字段（`flare_im_hooks::HookSelectorConfig`），空=全部。
 message HookSelector {
-  repeated string tenants = 1;  // 租户，空=全部
+  reserved 4, 5, 6, 7;
+
+  repeated string tenants = 1;  // 应用
   repeated string conversation_types = 2;  // 会话类型
   repeated string message_types = 3;  // 消息类型
-  repeated string business_types = 4;  // 业务类型
-  repeated HookPoint hook_points = 5;  // 与 HookConfig.hook_points 求交或覆盖由宿主定义
-  repeated string app_ids = 6;  // ISV / 子应用
-  repeated string conversation_ids = 7;  // 指定会话白名单，通常用于灰度
-}
-
-// Hook 重试策略
-message HookRetryPolicy {
-  int32 max_retries = 1;  // 最大重试次数，默认 3
-  int32 retry_interval_ms = 2;  // 重试间隔毫秒，默认 1000
-  string backoff_strategy = 3;  // 退避策略（exponential/linear）
 }
 
 // 创建 Hook 配置请求
 message CreateHookConfigRequest {
+  reserved 7, 8, 9;
+
   string name = 1;  // 名称
-  string hook_type = 2;  // 类型
-  string tenant_id = 3;  // 租户 ID
-  int32 priority = 4;  // 优先级
-  HookTransport transport = 5;  // 传输
+  string hook_type = 2;  // 点位的存储名
+  string tenant_id = 3;  // 应用 ID；空为平台
+  int32 order = 4;  // 同一来源内的先后
+  HookTransport transport = 5;  // 目标
   HookSelector selector = 6;  // 匹配条件
-  HookRetryPolicy retry_policy = 7;  // 重试策略
-  repeated HookPoint hook_points = 8;
-  HookExtensionBag config_extensions = 9;
+  bool required = 10;  // 必需
 }
 
 // 创建 Hook 配置响应
@@ -950,16 +365,16 @@ message GetHookConfigResponse {
   HookConfig config = 1;  // 配置
 }
 
-// 更新 Hook 配置请求
+// 更新 Hook 配置请求：没给的字段不变
 message UpdateHookConfigRequest {
+  reserved 6, 7, 8;
+
   string hook_id = 1;  // Hook ID
   string name = 2;  // 名称
-  int32 priority = 3;  // 优先级
-  HookTransport transport = 4;  // 传输
+  optional int32 order = 3;  // 同一来源内的先后
+  HookTransport transport = 4;  // 目标
   HookSelector selector = 5;  // 匹配条件
-  HookRetryPolicy retry_policy = 6;  // 重试策略
-  repeated HookPoint hook_points = 7;
-  HookExtensionBag config_extensions = 8;
+  optional bool required = 9;  // 必需
 }
 
 // 更新 Hook 配置响应
@@ -969,7 +384,7 @@ message UpdateHookConfigResponse {
 
 // 列出 Hook 配置请求
 message ListHookConfigsRequest {
-  string tenant_id = 1;  // 租户 ID
+  string tenant_id = 1;  // 应用 ID；空为平台。只列这个范围自己的行
   string hook_type = 2;  // 类型过滤
   bool enabled_only = 3;  // 仅启用
   flare.common.v1.Pagination pagination = 4;  // 分页
@@ -1000,6 +415,67 @@ message SetHookStatusRequest {
 // 设置 Hook 状态响应
 message SetHookStatusResponse {
   bool success = 1;  // 是否成功
+}
+
+// 点位目录里的一个点位
+message HookPointEntry {
+  string id = 1;  // 对外的点位名（message.pre_send）
+  string hook_type = 2;  // 存储名（pre_send）
+  string summary = 3;  // 说明
+}
+
+// 列出 Hook 点位请求
+message ListHookPointsRequest {}
+
+// 列出 Hook 点位响应
+message ListHookPointsResponse {
+  repeated HookPointEntry points = 1;  // 点位目录
+}
+
+// 部署文件里的一条 Hook：只读，不带密钥、请求头和 metadata 的值
+message DeploymentHook {
+  string name = 1;  // 名称
+  string hook_type = 2;  // 点位的存储名
+  string description = 3;  // 描述
+  bool enabled = 4;  // 是否启用
+  int32 order = 5;  // 同一来源内的先后
+  bool required = 6;  // 必需
+  int64 timeout_ms = 7;  // 超时毫秒
+  string target_type = 8;  // 目标类型（grpc/webhook/local）
+  string target_endpoint = 9;  // 目标地址，不含查询串
+  HookSelector selector = 10;  // 匹配条件
+}
+
+// 一个服务装载的部署 Hook（`hook_deployment_summary` 的一行）
+message HookProfile {
+  string service = 1;  // 服务名
+  string source = 2;  // 部署文件路径
+  string instance_id = 3;  // 最后写入的实例
+  google.protobuf.Timestamp loaded_at = 4;  // 装载时间
+  repeated DeploymentHook hooks = 5;  // 已装载的 Hook
+}
+
+// 列出部署 Hook 请求
+message ListHookProfilesRequest {}
+
+// 列出部署 Hook 响应
+message ListHookProfilesResponse {
+  repeated HookProfile profiles = 1;  // 每个服务一条
+}
+
+// 测试调用请求：用样例载荷调用目标一次，不进发送路径。给 hook_id 用已存的目标（含密钥），否则用
+// transport。hook_id 与 transport 同时给时 transport 优先，空的密钥、头沿用已存的值。
+message TestHookConfigRequest {
+  string hook_id = 1;  // 已存的 Hook
+  string hook_type = 2;  // 点位的存储名
+  HookTransport transport = 3;  // 目标
+}
+
+// 测试调用响应
+message TestHookConfigResponse {
+  string outcome = 1;  // allowed / rewritten / rejected / identity_required / failed
+  int64 latency_ms = 2;  // 耗时
+  string code = 3;  // 拒绝原因码或失败类别（timeout/unavailable/bad_response）
 }
 
 // Hook 统计

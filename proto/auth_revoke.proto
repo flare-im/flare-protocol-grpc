@@ -1,0 +1,14 @@
+syntax = "proto3";
+package flare.auth_revoke.v1;
+
+// Private identity-owner boundary. No client tokens, App secrets or Staff impersonation.
+service AuthRevocationService {
+  rpc RevokeIdentitySessions(RevokeIdentitySessionsRequest) returns (RevokeIdentitySessionsResponse);
+}
+message RevokeIdentitySessionsRequest {
+  string user_id = 1;
+  string revocation_id = 2;
+  int64 cutoff_ms = 3;
+  repeated string session_ids = 4;
+}
+message RevokeIdentitySessionsResponse { uint32 kicked = 1; }
