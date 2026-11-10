@@ -34,6 +34,41 @@ service TenantProjection {
   rpc GetVersions(GetVersionsRequest) returns (ProjectionVersions);
 }
 
+// =============================================================================
+// ClientBuildStats(平台从核读应用的在线构建分布)
+// =============================================================================
+// 只有核(capability 进程)实现。各接入网关每 30s 把本实例的（平台，构建）在线连接数写进
+// Redis(TTL 120s),这里把仍在存活窗口内的网关汇总起来。数据最多滞后一个上报周期,
+// 网关宕机后最多 120s 退出统计。鉴权:平台 worker 的控制断言,audience 是只读的
+// `flare-core-build-stats`(与 TenantProjection 的 `flare-core-projection` 互不通用),
+// 令牌租户必须正是请求的 app_id;平台级 `*` 拒绝(PERMISSION_DENIED)。
+
+service ClientBuildStats {
+  rpc GetConnectionBuilds(GetConnectionBuildsRequest) returns (ConnectionBuilds);
+}
+
+message GetConnectionBuildsRequest {
+  string app_id = 1;  // im_tenant_id,规范形式
+}
+
+message ConnectionBuildCount {
+  // 发布清单平台段:web / android / ios / tauri / electron;另有 harmonyos 与 other
+  string platform = 1;
+  // 构建号;0 = 客户端没报。older_builds = true 时恒为 0
+  uint64 app_build = 2;
+  uint64 connections = 3;
+  // true:该平台在列出的构建之外、更旧构建的合计(每个平台最多列 20 个最新构建)
+  bool older_builds = 4;
+}
+
+message ConnectionBuilds {
+  string app_id = 1;
+  // 按 platform 升序;同一平台内构建号降序,older_builds 行排在该平台最后
+  repeated ConnectionBuildCount builds = 2;
+  uint32 gateways = 3;          // 参与汇总的网关数
+  int64 collected_at_ms = 4;    // 汇总时刻(Unix 毫秒)
+}
+
 // ----------------------------------------------------------------------------
 // 租户投影
 // ----------------------------------------------------------------------------
