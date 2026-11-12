@@ -5,6 +5,7 @@ package flare.push.v1;
 import "errors.proto";
 import "data.proto";
 import "message.proto";
+import "topic_envelope.proto";
 
 // =============================================================================
 // PushService：业务侧推送入口（消息 / 通知 + 可选最小任务状态）
@@ -21,8 +22,28 @@ service PushService {
   rpc RegisterDevicePushToken(RegisterDevicePushTokenRequest) returns (RegisterDevicePushTokenResponse);
   rpc InspectDevicePushBinding(InspectDevicePushBindingRequest) returns (InspectDevicePushBindingResponse);
   rpc RevokeDevicePushBinding(RevokeDevicePushBindingRequest) returns (RevokeDevicePushBindingResponse);
+  // 设备交接：一台设备的新消息提示从链路转交给推送通道。只接受内部工作负载（接入网关、Online 清扫器）
+  // 的已验证身份；proxy 校验后发布到 flare.im.push.handoff，由 push-server 补提示。
+  rpc ReportDeviceHandoff(ReportDeviceHandoffRequest) returns (ReportDeviceHandoffResponse);
+  // 服务端吊销推送绑定：设备被踢下线、身份会话被吊销时由 Online 调用，之后这台设备不再收到任何推送。
+  // 只接受内部工作负载的已验证身份。与客户端凭吊销令牌自行吊销的 RevokeDevicePushBinding 相互独立，
+  // 两者可以重复执行。
+  rpc RevokeDeviceBindings(RevokeDeviceBindingsRequest) returns (RevokeDeviceBindingsResponse);
   // 可选：仅返回 proxy 侧记录的粗粒度状态（如 pending）；细粒度投递结果由业务或下游观测补齐
   rpc QueryPushStatus(QueryPushStatusRequest) returns (QueryPushStatusResponse);
+  // 到达回执：设备收到推送后（通知扩展或应用进程）报上来的一批回执。只接受网关代签的用户身份，
+  // 租户与用户取自签名；尽力而为，只进指标与决策链，不影响投递。
+  rpc ReportPushReceipts(ReportPushReceiptsRequest) returns (ReportPushReceiptsResponse);
+}
+
+// PushAdminService：管理员只读入口（Console → admin-gateway → Push Proxy）。
+// authorization 携带 admin-gateway 原样转发的 Staff `x-flare-ctx`（网关 admin 分区签，kid=gateway，
+// 权限码 core:users:read）；租户只取自已验证的令牌，请求体不带 tenant_id。
+// 单独成服务而不是往 PushService 里加方法：管理员令牌与内部工作负载身份分开校验，已有 PushService
+// 实现也不需要跟着改。
+service PushAdminService {
+  // 一个用户的推送决策链（24 小时留存）：给了 message_id 时只查这一条，否则查最近的 limit 条。
+  rpc AdminQueryPushTrace(AdminQueryPushTraceRequest) returns (AdminQueryPushTraceResponse);
 }
 
 enum DevicePushProvider {
@@ -103,6 +124,19 @@ message RegisterDevicePushTokenRequest {
   string binding_id = 6;
   string expected_version = 7;
   int64 expires_at_ms = 8;
+  // 应用标识：iOS 的 bundle id、Android 的 applicationId。三个通道都必填：APNs 用它作
+  // apns-topic（必须列在该应用 APNs 凭据的 topics 里），个推的 Android 厂商通知点开时打开这个包。
+  string app_bundle = 9;
+  // 只用于 APNs：sandbox 或 production，空按 production。开发构建拿到的令牌只在沙盒有效。
+  string environment = 10;
+  // BCP 47 语言标签，例如 zh-CN。服务端渲染兜底文案时按它选语言。
+  string locale = 11;
+  // IANA 时区，例如 Asia/Shanghai。
+  string time_zone = 12;
+  string app_version = 13;
+  // 设备的推送能力。已知取值：dataMessages（Android 能收 FCM 数据消息）、
+  // serviceExtension（iOS 带通知扩展）。其余取值拒收。
+  repeated string capabilities = 14;
 }
 
 message RegisterDevicePushTokenResponse {
@@ -127,6 +161,90 @@ message RevokeDevicePushBindingRequest {
 }
 message RevokeDevicePushBindingResponse {
   bool success = 1;
+}
+
+message ReportDeviceHandoffRequest {
+  flare.common.v1.DeviceHandoff handoff = 1;
+}
+message ReportDeviceHandoffResponse {
+  bool accepted = 1;
+}
+
+message RevokeDeviceBindingsRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  // 目标设备；空表示该用户在本租户下的全部设备。
+  string device_id = 3;
+  // 诊断用的原因，小写蛇形：kicked、identity_revoked、tenant_kicked、device_replaced。
+  string reason = 4;
+  // 只吊销登记时间不晚于它的绑定（Unix 毫秒），取触发吊销的那个事件的时间。
+  // 吊销是异步送达的：设备可能在这之前已经重新登录并登记了新绑定，新绑定不能被迟到的吊销清掉。必填，须大于 0。
+  int64 registered_before = 5;
+}
+message RevokeDeviceBindingsResponse {
+  // 实际吊销的绑定数；没有绑定时为 0，不算失败。
+  uint32 revoked = 1;
+}
+
+// 一条到达回执：设备收到的那条推送载荷里的标识，加上收到的通道与时刻。
+message PushReceipt {
+  string conversation_id = 1;
+  string message_id = 2;
+  uint64 seq = 3;
+  string collapse_id = 4;
+  // 载荷里的处置：loud、quiet、clear、badge_only、recall_replace、digest。
+  string disposition = 5;
+  // apns、fcm 或 getui。
+  string provider = 6;
+  // extension（iOS 通知扩展）或 app（应用进程处理了这条推送）。
+  string path = 7;
+  // 设备时钟的收到时刻（Unix 毫秒）。服务端收到的时刻另记，延迟由读取方计算。
+  int64 received_at_ms = 8;
+}
+
+// 一台设备的一批到达回执，至多 100 条。tenant_id 与 user_id 必须等于签名身份；
+// 认不出的条目跳过，不让整批失败。
+message ReportPushReceiptsRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string device_id = 3;
+  // 应用版本：至多 32 个 [0-9A-Za-z._+-] 字符，其余一律记为 other。
+  string app_version = 4;
+  repeated PushReceipt receipts = 5;
+}
+
+message ReportPushReceiptsResponse {
+  // 记下的回执条数。
+  uint32 accepted = 1;
+}
+
+// 租户取自 Staff 令牌。limit 缺省 20、至多 50；给了 message_id 时 limit 不起作用。
+message AdminQueryPushTraceRequest {
+  string user_id = 1;
+  optional string message_id = 2;
+  uint32 limit = 3;
+}
+
+// 决策链里的一条记录：哪个环节（route、handoff、decide、gate、task、vendor、receipt、correction）、
+// 哪台设备、记下了什么。
+message PushTraceEntryView {
+  int64 at_ms = 1;
+  string stage = 2;
+  string device_id = 3;
+  map<string, string> fields = 4;
+}
+
+// 一条消息的决策链：trace_key 是消息 ID（没有时是「会话#seq」），会话取第一条记录的 conv。
+message PushTraceView {
+  string trace_key = 1;
+  string conversation_id = 2;
+  int64 first_at_ms = 3;
+  repeated PushTraceEntryView entries = 4;
+}
+
+// 按开始时间从新到旧；查一条消息而它已过期时为空。
+message AdminQueryPushTraceResponse {
+  repeated PushTraceView traces = 1;
 }
 
 message PushOptions {

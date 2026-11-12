@@ -55,6 +55,64 @@
   查一批(至多 50 个)已落库消息所在的会话,不返回内容。供写路径授权一次核对一批 ID,
   例如已读回执点名的消息都要属于本会话。新服务,已有的 `StorageReaderService` 实现与测试
   替身不需要改动。
+- `online.proto`:`OnlineService.ReportDeviceState(ReportDeviceStateRequest) ->
+  ReportDeviceStateResponse`,接入网关把客户端的 `DEVICE_STATE` 上报转给 Online,按会话 ID 更新
+  在线记录里的应用状态、用户注意力与角标基线;会话已不存在时 `success=false`。
+  `LoginRequest` 新增 `app_state`(13)与 `attention`(14),建连时带上当时的状态,未填按前台处理;
+  `DeviceInfo` 新增 `app_state`(12)、`attention`(13)、`state_since`(14)与 `badge`(15)。
+  推送路由据此按设备判定新消息的提示归链路还是归推送通道。新增字段,老调用方不填即按前台。
+  实现 `OnlineService` 的服务端与测试替身需要补上新方法。
+- `PushService.ReportDeviceHandoff(ReportDeviceHandoffRequest) -> ReportDeviceHandoffResponse`:
+  一台设备的新消息提示从链路转交给推送通道时,接入网关或 Online 上报一条
+  `flare.common.v1.DeviceHandoff`,Push Proxy 校验后发布到 `flare.im.push.handoff`,由 Push Server
+  对这台设备补一次提示。只接受这两个内部工作负载的已验证服务身份。
+- `PushService.RevokeDeviceBindings(RevokeDeviceBindingsRequest) -> RevokeDeviceBindingsResponse`:
+  服务端吊销设备推送绑定,设备被踢下线、被顶替、被租户踢出或身份会话被吊销时由 Online 调用。
+  请求带 `tenant_id`、`user_id`、`device_id`(空表示该用户的全部设备)、`reason` 与必填的
+  `registered_before`(Unix 毫秒):只吊销登记时间不晚于它的绑定,设备重新登录后登记的新绑定
+  不受迟到的吊销影响。响应 `revoked` 是实际吊销的绑定数,0 不算失败,可以重复调用。与客户端凭
+  吊销令牌的 `RevokeDevicePushBinding` 相互独立。
+  实现 `PushService` 的服务端与测试替身需要补上这两个新方法。
+- `ConversationInternalReadService { ListRecentUnreadConversations }`(会话服务承载):Cell 内
+  服务以自己的身份按用户读。`ListRecentUnreadConversationsRequest { user_id, since, limit }`
+  返回该用户仍在其中、最后一条消息晚于 `since`(Unix 毫秒)、不是他自己发的、且他还有未读的会话
+  (`RecentUnreadConversation`:会话 ID、最后一条消息的 seq / ID / 时间 / 发送者、未读数),从新到旧,
+  单次至多 20 个。只接受签名的服务身份,租户只取自签名。供设备转入推送通道后补提示用。
+  新服务,已有的会话读服务及其测试替身不需要改动。
+- `ConversationInternalReadService` 再增加两个方法,供 Push Server 做提示判定:
+  `BatchGetUserNotificationSettings(BatchGetUserNotificationSettingsRequest { user_ids })`
+  一次读至多 500 个用户的用户级通知设置,响应 `settings` 以 user_id 为键,每个请求的用户都有一项,
+  没有设置过的是默认值;`ListNotificationSubscribers(ListNotificationSubscribersRequest
+  { conversation_id, page_token, page_size })` 按 user_id 升序分页列出会话里开启了「全部消息通知」、
+  仍在席且没有设免打扰或仅 @我 的成员,每页至多 1000 个,整个列表封顶 5000 人,
+  `truncated` 表示到了上限且后面还有。同样只接受签名的服务身份,租户只取自签名。
+- `UserNotificationSettingsService { GetUserNotificationSettings, UpdateUserNotificationSettings }`
+  (会话服务承载):调用者本人的用户级通知设置读与部分更新,只接受网关代签的用户身份,
+  请求不带 user_id 与 tenant_id。`UpdateUserNotificationSettingsRequest` 的勿扰时段整体替换或用
+  `clear_quiet_hours` 取消,`base_settings_version` 为 0 时不校验版本。客户端经同步编排
+  (`Sync.user_notification_settings` / `Sync.get_user_notification_settings`)到达这里。新服务。
+- `UpdateConversationUserSettingsRequest` 新增 `optional bool notify_all`(9):成员在大群里显式开启
+  「全部消息通知」;返回的 `ConversationUserSettings.notify_all` 带出当前值。按全部字段构造该请求的
+  调用方需要补上新字段。
+- `RegisterDevicePushTokenRequest` 新增 `app_bundle`(9)、`environment`(10)、`locale`(11)、
+  `time_zone`(12)、`app_version`(13)与 `repeated string capabilities`(14)。`app_bundle` 是
+  iOS 的 bundle id 或 Android 的 applicationId,三个通道的绑定都必填,APNs 用它作 topic,
+  个推的 Android 厂商通知点开时打开这个包里的页面;
+  `environment` 只用于 APNs,取 `sandbox` 或 `production`(空按生产);`capabilities` 只收
+  `dataMessages`、`serviceExtension`。任一字段变化都是一次新的登记,要换新的 `binding_id`。
+  Push Proxy 另在绑定记录里维护最近活跃时间:设备核对自己的绑定时刷新,60 天(可配)没活跃的
+  绑定在路由与投递时视为不存在,由投递侧删除。
+- `PushService.ReportPushReceipts(ReportPushReceiptsRequest) -> ReportPushReceiptsResponse`:
+  设备的到达回执。一批至多 100 条 `PushReceipt`(会话、消息、seq、合并键、处置、通道
+  `apns`/`fcm`/`getui`、来路 `extension`/`app`、设备时钟的收到时刻),`app_version` 至多 32 个
+  `[0-9A-Za-z._+-]` 字符,其余记为 `other`。只接受网关代签的用户身份,租户与用户必须等于签名;
+  认不出的条目跳过,响应 `accepted` 是记下的条数。回执只进指标与推送决策链,不影响投递。
+  实现 `PushService` 的服务端与测试替身需要补上新方法。
+- `PushAdminService { AdminQueryPushTrace }`(Push Proxy 承载):管理员按用户查推送决策链,
+  `AdminQueryPushTraceRequest { user_id, optional message_id, limit }`,给了 `message_id` 只查这一条,
+  否则查最近 `limit` 条(缺省 20,至多 50)。返回 `PushTraceView`(键、会话、开始时间与按时间排列的
+  `PushTraceEntryView`:时刻、环节、设备与字段)。只认 admin-gateway 原样转发的 Staff 上下文
+  (`core:users:read`),租户取自令牌。新服务,已有的 `PushService` 实现与测试替身不需要改动。
 
 ### 移除
 

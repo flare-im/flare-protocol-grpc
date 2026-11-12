@@ -22,6 +22,7 @@ service OnlineService {
   rpc Login(LoginRequest) returns (LoginResponse);  // 登录
   rpc Logout(LogoutRequest) returns (LogoutResponse);  // 登出
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);  // 心跳
+  rpc ReportDeviceState(ReportDeviceStateRequest) returns (ReportDeviceStateResponse);  // 设备前后台状态上报（网关转发客户端的 DEVICE_STATE）
   rpc GetOnlineStatus(GetOnlineStatusRequest) returns (GetOnlineStatusResponse);  // 在线状态
   rpc WatchPresence(WatchPresenceRequest) returns (stream PresenceEvent);  // 订阅在线状态流
   rpc GetUserPresence(GetUserPresenceRequest) returns (GetUserPresenceResponse);  // 用户在线状态
@@ -81,6 +82,8 @@ message LoginRequest {
   int64 token_version = 10;  // Token 版本（强制下线）
   flare.common.v1.ConnectionQuality initial_quality = 11;  // 登录时链接质量
   string resume_conversation_id = 12;  // 断线重连会话 ID
+  flare.common.v1.DeviceAppState app_state = 13;  // 建连时的应用状态；UNSPECIFIED 按 ACTIVE 处理
+  flare.common.v1.DeviceAttention attention = 14;  // 建连时的用户注意力
 }
 
 // 登录响应
@@ -113,6 +116,21 @@ message HeartbeatRequest {
 // 心跳响应
 message HeartbeatResponse {
   bool success = 1;  // 是否成功
+}
+
+// 设备状态上报请求。网关收到客户端的 DEVICE_STATE 系统命令后转发；按会话 ID 定位在线记录。
+// 状态为 PARKING 或 DEFERRED 的设备，提示归推送通道：推送路由在路由消息时直接给它发离线推送。
+message ReportDeviceStateRequest {
+  string user_id = 1;  // 用户 ID
+  string conversation_id = 2;  // 会话 ID（Login 返回的那个）
+  flare.common.v1.DeviceAppState app_state = 3;  // 应用状态
+  flare.common.v1.DeviceAttention attention = 4;  // 用户注意力
+  uint32 badge = 5;  // 设备当前未读总数（角标基线）
+}
+
+// 设备状态上报响应
+message ReportDeviceStateResponse {
+  bool success = 1;  // 是否成功；会话已不存在时为 false
 }
 
 // 在线状态查询请求
@@ -167,6 +185,10 @@ message DeviceInfo {
   string conversation_id = 9;  // 会话 ID
   string gateway_id = 10;  // 网关 ID（路由）
   string server_id = 11;  // Server ID（跨服路由）
+  flare.common.v1.DeviceAppState app_state = 12;  // 应用状态
+  flare.common.v1.DeviceAttention attention = 13;  // 用户注意力
+  google.protobuf.Timestamp state_since = 14;  // 进入当前应用状态的时间
+  uint32 badge = 15;  // 最近一次上报的未读总数
 }
 
 // 用户在线状态

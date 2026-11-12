@@ -61,6 +61,28 @@ service MessageReadReceiptService {
   rpc ListMessageReaders(ListMessageReadersRequest) returns (ListMessageReadersResponse);
 }
 
+/// ConversationInternalReadService：Cell 内服务以自己的身份**按用户**读（只读）。
+/// 只接受 Cell 签名的服务身份（`x-flare-ctx`，actor 为 Service），一律要求签名：请求体里的
+/// user_id（或 user_ids、conversation_id）说的是读谁的数据，不是谁在读；租户只取自签名，请求不带
+/// tenant_id。
+/// 单独成服务：ConversationReadService 的读都是「调用者读自己的」，已有实现及其测试替身不受影响。
+service ConversationInternalReadService {
+  // 某用户在给定时刻之后有新未读消息的会话（设备转入推送通道后补提示用）
+  rpc ListRecentUnreadConversations(ListRecentUnreadConversationsRequest) returns (ListRecentUnreadConversationsResponse);
+  // 一批用户的用户级通知设置（推送判定用）；没有设置过的用户返回默认值
+  rpc BatchGetUserNotificationSettings(BatchGetUserNotificationSettingsRequest) returns (BatchGetUserNotificationSettingsResponse);
+  // 会话里开启了「全部消息通知」的成员（大群推送波次枚举的订阅者），按 user_id 升序分页
+  rpc ListNotificationSubscribers(ListNotificationSubscribersRequest) returns (ListNotificationSubscribersResponse);
+}
+
+/// UserNotificationSettingsService：调用者本人的用户级通知设置（读与部分更新）。
+/// 只接受用户身份（网关代签的 `x-flare-ctx`，经同步编排原样转发）；读写的永远是调用者自己，
+/// 请求不带 user_id 与 tenant_id。单独成服务：已有会话读写服务的实现与测试替身不受影响。
+service UserNotificationSettingsService {
+  rpc GetUserNotificationSettings(GetUserNotificationSettingsRequest) returns (GetUserNotificationSettingsResponse);
+  rpc UpdateUserNotificationSettings(UpdateUserNotificationSettingsRequest) returns (UpdateUserNotificationSettingsResponse);
+}
+
 /// ConversationManageService：会话写模型与侧效应（创建/更新/删除、参与者、同步游标、已读、在线、搜索等）
 service ConversationManageService {
   rpc CreateConversation(CreateConversationRequest) returns (CreateConversationResponse);  // 创建会话
@@ -219,6 +241,82 @@ message ListMessageReadersResponse {
   repeated string user_ids = 5;
   string next_cursor = 6;
   bool has_more = 7;
+}
+
+// --- 某用户有新未读消息的会话（服务身份按用户读）---
+//
+// 只回答该用户在席（未隐藏、未退出）的会话。「最后一条消息」是该用户看得到的、未撤回也未删除的
+// 最新一条；它须晚于 since、且不是该用户自己发的。未读数口径与会话列表摘要相同：已物化的未读
+// 与按已读水位重算（封顶）的未读取大者，超大群没有物化未读时就是重算值。
+
+/// 某用户有新未读消息的会话请求。
+message ListRecentUnreadConversationsRequest {
+  string user_id = 1;  // 读谁的会话
+  int64 since = 2;     // 只要最后一条消息晚于该时刻的会话，Unix epoch 毫秒
+  int32 limit = 3;     // 0 = 20，最大 20
+}
+
+/// 一个有新未读消息的会话。
+message RecentUnreadConversation {
+  string conversation_id = 1;
+  uint64 last_message_seq = 2;   // 最后一条消息的会话 seq
+  string last_message_id = 3;    // 最后一条消息的服务端 ID
+  int64 last_message_time = 4;   // 最后一条消息的时间，Unix epoch 毫秒
+  string last_sender_id = 5;     // 最后一条消息的发送者
+  uint32 unread_count = 6;       // 该用户在这个会话的未读数，恒大于 0；重算部分在服务端上限处饱和
+}
+
+/// 某用户有新未读消息的会话响应：按最后一条消息的时间从新到旧。
+message ListRecentUnreadConversationsResponse {
+  repeated RecentUnreadConversation conversations = 1;
+}
+
+// --- 推送判定用的通知设置读（服务身份按用户读）---
+
+/// 一批用户的用户级通知设置请求。
+message BatchGetUserNotificationSettingsRequest {
+  repeated string user_ids = 1;  // 1..=500 个，互不相同，不带首尾空白
+}
+
+/// 一批用户的用户级通知设置响应：请求里的每个用户都有一项，没有设置过的是默认值（settings_version 为 0）。
+message BatchGetUserNotificationSettingsResponse {
+  map<string, flare.common.v1.UserNotificationSettings> settings = 1;  // 键为 user_id
+}
+
+/// 会话通知订阅者请求：会话里开启了「全部消息通知」的成员。
+message ListNotificationSubscribersRequest {
+  string conversation_id = 1;
+  string page_token = 2;  // 空 = 第一页；否则原样回传上一页的 next_page_token
+  int32 page_size = 3;    // 0 = 1000，最大 1000
+}
+
+/// 会话通知订阅者响应。只列在席（未退出、未删除会话）且没有设免打扰、仅 @我 的成员，按 user_id
+/// 升序；整个列表封顶 5000 人，超出的不列。
+message ListNotificationSubscribersResponse {
+  repeated string user_ids = 1;
+  string next_page_token = 2;  // 空 = 没有下一页
+  bool truncated = 3;          // 到了 5000 人上限且后面还有订阅者
+}
+
+// --- 调用者本人的用户级通知设置 ---
+
+message GetUserNotificationSettingsRequest {}
+
+message GetUserNotificationSettingsResponse {
+  flare.common.v1.UserNotificationSettings settings = 1;
+}
+
+/// 部分更新调用者本人的用户级通知设置：没带的项保持不变，至少要带一项。
+message UpdateUserNotificationSettingsRequest {
+  optional flare.common.v1.QuietHours quiet_hours = 1;  // 设置勿扰时段，整体替换
+  bool clear_quiet_hours = 2;                           // 取消勿扰时段；与 quiet_hours 同时出现时拒绝
+  optional flare.common.v1.NotificationPreview preview = 3;
+  optional flare.common.v1.MultiDeviceAlertPolicy multi_device = 4;
+  uint64 base_settings_version = 5;                     // 客户端已知版本；0 表示不校验
+}
+
+message UpdateUserNotificationSettingsResponse {
+  flare.common.v1.UserNotificationSettings settings = 1;
 }
 
 // --- 会话写模型与公共结构（创建/更新返回、参与者、策略、设备、游标）---
@@ -407,6 +505,8 @@ message UpdateConversationUserSettingsRequest {
   optional bool is_mention_only = 7;
   /// Monotonically advance the authenticated participant’s history cutoff.
   optional uint64 clear_history_through_seq = 8;
+  /// 大群里显式开启「全部消息通知」，进入该会话的通知订阅者（ListNotificationSubscribers）
+  optional bool notify_all = 9;
 }
 
 message UpdateConversationUserSettingsResponse {
